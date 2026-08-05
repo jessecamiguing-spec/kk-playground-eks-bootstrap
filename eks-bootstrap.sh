@@ -69,7 +69,11 @@ get_default_vpc_id() {
 
 get_subnet_ids_for_vpc() {
   local vpc_id="$1"
-  aws ec2 describe-subnets --filters Name=vpc-id,Values="${vpc_id}" --query 'Subnets[].SubnetId' --output text | tr '\t' ','
+  # us-east-1e cannot host EKS control-plane instances (permanent AWS limitation).
+  aws ec2 describe-subnets \
+    --filters Name=vpc-id,Values="${vpc_id}" \
+    --query "Subnets[?AvailabilityZone!='us-east-1e'].SubnetId" \
+    --output text | tr '\t' ','
 }
 
 create_key_pair() {
