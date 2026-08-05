@@ -172,6 +172,7 @@ deploy_node_group_stack() {
   {"ParameterKey": "ClusterName", "ParameterValue": "${CLUSTER_NAME}"},
   {"ParameterKey": "ClusterControlPlaneSecurityGroup", "ParameterValue": "${control_plane_sg}"},
   {"ParameterKey": "NodeGroupName", "ParameterValue": "${CLUSTER_NAME}"},
+  {"ParameterKey": "NodeImageIdSSMParam", "ParameterValue": "/aws/service/eks/optimized-ami/${KUBERNETES_VERSION}/amazon-linux-2/recommended/image_id"},
   {"ParameterKey": "NodeAutoScalingGroupMinSize", "ParameterValue": "1"},
   {"ParameterKey": "NodeAutoScalingGroupDesiredCapacity", "ParameterValue": "2"},
   {"ParameterKey": "NodeAutoScalingGroupMaxSize", "ParameterValue": "3"},
