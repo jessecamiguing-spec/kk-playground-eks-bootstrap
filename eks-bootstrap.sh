@@ -167,17 +167,21 @@ deploy_node_group_stack() {
     --stack-name "${CLUSTER_NAME}" \
     --template-url "${NODEGROUP_TEMPLATE_URL}" \
     --capabilities CAPABILITY_IAM \
-    --parameters \
-      ParameterKey=ClusterName,ParameterValue="${CLUSTER_NAME}" \
-      ParameterKey=ClusterControlPlaneSecurityGroup,ParameterValue="${control_plane_sg}" \
-      ParameterKey=NodeGroupName,ParameterValue="${CLUSTER_NAME}" \
-      ParameterKey=NodeAutoScalingGroupMinSize,ParameterValue=1 \
-      ParameterKey=NodeAutoScalingGroupDesiredCapacity,ParameterValue=2 \
-      ParameterKey=NodeAutoScalingGroupMaxSize,ParameterValue=3 \
-      ParameterKey=NodeInstanceType,ParameterValue=t3.small \
-      ParameterKey=KeyName,ParameterValue="${CLUSTER_NAME}" \
-      ParameterKey=VpcId,ParameterValue="${vpc_id}" \
-      ParameterKey=Subnets,ParameterValue="${subnet_ids}" \
+    --parameters "$(cat <<PARAMS
+[
+  {"ParameterKey": "ClusterName", "ParameterValue": "${CLUSTER_NAME}"},
+  {"ParameterKey": "ClusterControlPlaneSecurityGroup", "ParameterValue": "${control_plane_sg}"},
+  {"ParameterKey": "NodeGroupName", "ParameterValue": "${CLUSTER_NAME}"},
+  {"ParameterKey": "NodeAutoScalingGroupMinSize", "ParameterValue": "1"},
+  {"ParameterKey": "NodeAutoScalingGroupDesiredCapacity", "ParameterValue": "2"},
+  {"ParameterKey": "NodeAutoScalingGroupMaxSize", "ParameterValue": "3"},
+  {"ParameterKey": "NodeInstanceType", "ParameterValue": "t3.small"},
+  {"ParameterKey": "KeyName", "ParameterValue": "${CLUSTER_NAME}"},
+  {"ParameterKey": "VpcId", "ParameterValue": "${vpc_id}"},
+  {"ParameterKey": "Subnets", "ParameterValue": "${subnet_ids}"}
+]
+PARAMS
+)" \
     >/dev/null
 
   echo "    Stack creation initiated."
