@@ -8,7 +8,7 @@ set -euo pipefail
 CLUSTER_ROLE_NAME="eksClusterRole"
 CLUSTER_ROLE_POLICY_ARN="arn:aws:iam::aws:policy/AmazonEKSClusterPolicy"
 KUBERNETES_VERSION="1.35"
-NODEGROUP_TEMPLATE_URL="https://s3.us-west-2.amazonaws.com/amazon-eks/cloudformation/2022-12-23/amazon-eks-nodegroup.yaml"
+NODEGROUP_TEMPLATE_URL="https://s3.us-west-2.amazonaws.com/amazon-eks/cloudformation/2025-11-26/amazon-eks-nodegroup.yaml"
 NODE_DESIRED_COUNT=2
 NODE_JOIN_TIMEOUT_SECONDS=300
 NODE_JOIN_POLL_INTERVAL_SECONDS=15
@@ -150,6 +150,18 @@ get_cluster_security_group() {
   aws eks describe-cluster --name "${CLUSTER_NAME}" --query 'cluster.resourcesVpcConfig.clusterSecurityGroupId' --output text
 }
 
+get_cluster_endpoint() {
+  aws eks describe-cluster --name "${CLUSTER_NAME}" --query 'cluster.endpoint' --output text
+}
+
+get_cluster_certificate_authority() {
+  aws eks describe-cluster --name "${CLUSTER_NAME}" --query 'cluster.certificateAuthority.data' --output text
+}
+
+get_cluster_service_cidr() {
+  aws eks describe-cluster --name "${CLUSTER_NAME}" --query 'cluster.kubernetesNetworkConfig.serviceIpv4Cidr' --output text
+}
+
 deploy_node_group_stack() {
   echo "==> Deploying node group CloudFormation stack: ${CLUSTER_NAME}"
 
@@ -158,10 +170,13 @@ deploy_node_group_stack() {
     return
   fi
 
-  local vpc_id subnet_ids control_plane_sg
+  local vpc_id subnet_ids control_plane_sg api_endpoint ca_data service_cidr
   vpc_id=$(get_default_vpc_id)
   subnet_ids=$(get_subnet_ids_for_vpc "${vpc_id}")
   control_plane_sg=$(get_cluster_security_group)
+  api_endpoint=$(get_cluster_endpoint)
+  ca_data=$(get_cluster_certificate_authority)
+  service_cidr=$(get_cluster_service_cidr)
 
   aws cloudformation create-stack \
     --stack-name "${CLUSTER_NAME}" \
@@ -171,6 +186,10 @@ deploy_node_group_stack() {
 [
   {"ParameterKey": "ClusterName", "ParameterValue": "${CLUSTER_NAME}"},
   {"ParameterKey": "ClusterControlPlaneSecurityGroup", "ParameterValue": "${control_plane_sg}"},
+  {"ParameterKey": "AuthenticationMode", "ParameterValue": "EKS API and ConfigMap"},
+  {"ParameterKey": "ApiServerEndpoint", "ParameterValue": "${api_endpoint}"},
+  {"ParameterKey": "CertificateAuthorityData", "ParameterValue": "${ca_data}"},
+  {"ParameterKey": "ServiceCidr", "ParameterValue": "${service_cidr}"},
   {"ParameterKey": "NodeGroupName", "ParameterValue": "${CLUSTER_NAME}"},
   {"ParameterKey": "NodeImageIdSSMParam", "ParameterValue": "/aws/service/eks/optimized-ami/${KUBERNETES_VERSION}/amazon-linux-2023/x86_64/standard/recommended/image_id"},
   {"ParameterKey": "NodeAutoScalingGroupMinSize", "ParameterValue": "1"},
