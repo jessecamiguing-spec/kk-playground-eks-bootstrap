@@ -97,6 +97,30 @@ create_key_pair() {
   echo "    Key pair ${CLUSTER_NAME} created. Private key saved to ${key_file}"
 }
 
+wait_with_spinner() {
+  local message="$1"
+  shift
+
+  "$@" &
+  local pid=$!
+  local spin='|/-\'
+  local i=0
+  local start_ts=${SECONDS}
+
+  while kill -0 "${pid}" 2>/dev/null; do
+    local frame="${spin:i%${#spin}:1}"
+    i=$((i + 1))
+    printf "\r    %s %s (%ds elapsed)  " "${frame}" "${message}" "$((SECONDS - start_ts))"
+    sleep 0.2
+  done
+
+  local status=0
+  wait "${pid}" || status=$?
+
+  printf "\r    %s (%ds)                  \n" "${message}" "$((SECONDS - start_ts))"
+  return "${status}"
+}
+
 create_cluster() {
   echo "==> Creating EKS cluster: ${CLUSTER_NAME}"
 
@@ -117,8 +141,8 @@ create_cluster() {
     echo "    Cluster creation initiated."
   fi
 
-  echo "    Waiting for cluster ${CLUSTER_NAME} to become ACTIVE (this can take 10-15 minutes)..."
-  aws eks wait cluster-active --name "${CLUSTER_NAME}"
+  wait_with_spinner "Waiting for cluster ${CLUSTER_NAME} to become ACTIVE" \
+    aws eks wait cluster-active --name "${CLUSTER_NAME}"
   echo "    Cluster ${CLUSTER_NAME} is ACTIVE."
 }
 
@@ -156,8 +180,9 @@ deploy_node_group_stack() {
       ParameterKey=Subnets,ParameterValue="${subnet_ids}" \
     >/dev/null
 
-  echo "    Stack creation initiated. Waiting for CREATE_COMPLETE (this can take several minutes)..."
-  aws cloudformation wait stack-create-complete --stack-name "${CLUSTER_NAME}"
+  echo "    Stack creation initiated."
+  wait_with_spinner "Waiting for CloudFormation stack ${CLUSTER_NAME} (CREATE_COMPLETE)" \
+    aws cloudformation wait stack-create-complete --stack-name "${CLUSTER_NAME}"
   echo "    Stack ${CLUSTER_NAME} is CREATE_COMPLETE."
 }
 
