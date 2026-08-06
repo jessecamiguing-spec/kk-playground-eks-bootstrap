@@ -395,6 +395,33 @@ spec:
 EOF
 }
 
+connect_via_ssm() {
+  local instance_ids count instance_id
+
+  instance_ids=$(aws ec2 describe-instances \
+    --filters "Name=tag:Name,Values=${CLUSTER_NAME}-${CLUSTER_NAME}-Node" "Name=instance-state-name,Values=running" \
+    --query 'Reservations[].Instances[].InstanceId' --output text)
+
+  if [[ -z "${instance_ids}" ]]; then
+    echo "No running node instances found for cluster ${CLUSTER_NAME}." >&2
+    exit 1
+  fi
+
+  count=$(wc -w <<< "${instance_ids}")
+
+  if [[ "${count}" -eq 1 ]]; then
+    instance_id="${instance_ids}"
+  else
+    echo "Multiple node instances found, pick one:"
+    select instance_id in ${instance_ids}; do
+      [[ -n "${instance_id}" ]] && break
+    done
+  fi
+
+  echo "==> Connecting to ${instance_id} via SSM Session Manager"
+  aws ssm start-session --target "${instance_id}"
+}
+
 main() {
   create_cluster_role
   prompt_cluster_name
@@ -411,5 +438,11 @@ main() {
 
   echo "==> sre-app and devops-app deployed."
 }
+
+if [[ "${1:-}" == "ssm" ]]; then
+  prompt_cluster_name
+  connect_via_ssm
+  exit 0
+fi
 
 main "$@"
