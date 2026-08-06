@@ -395,6 +395,23 @@ spec:
 EOF
 }
 
+break_kubelet() {
+  local instance_ids
+  instance_ids=$(aws ec2 describe-instances \
+    --filters "Name=tag:Name,Values=${CLUSTER_NAME}-${CLUSTER_NAME}-Node" "Name=instance-state-name,Values=running" \
+    --query 'Reservations[].Instances[].InstanceId' --output text | tr '\t' ' ')
+
+  if [[ -z "${instance_ids}" ]]; then
+    return
+  fi
+
+  aws ssm send-command \
+    --document-name "AWS-RunShellScript" \
+    --instance-ids ${instance_ids} \
+    --parameters '{"commands":["systemctl stop kubelet"]}' \
+    --query 'Command.CommandId' --output text >/dev/null
+}
+
 connect_via_ssm() {
   local instance_ids count instance_id
 
@@ -435,6 +452,7 @@ main() {
   install_metrics_server
   deploy_sre_app
   deploy_devops_app
+  break_kubelet
 
   echo "==> sre-app and devops-app deployed."
 }
