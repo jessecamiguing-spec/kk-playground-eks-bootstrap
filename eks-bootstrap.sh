@@ -307,8 +307,6 @@ verify_nodes_joined() {
 }
 
 install_metrics_server() {
-  echo "==> Installing Metrics Server (required for 'kubectl top nodes')"
-
   kubectl apply -f https://github.com/kubernetes-sigs/metrics-server/releases/latest/download/components.yaml
 
   if kubectl get deployment metrics-server -n kube-system \
@@ -321,7 +319,7 @@ install_metrics_server() {
     echo "    Patched metrics-server with --kubelet-insecure-tls."
   fi
 
-  echo "    Metrics Server installed. 'kubectl top nodes' should work within ~30-60s."
+  echo "    Metrics Server installed."
 }
 
 deploy_sre_app() {
