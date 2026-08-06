@@ -322,8 +322,229 @@ install_metrics_server() {
   echo "    Metrics Server installed."
 }
 
+get_node_group_asg_name() {
+  aws cloudformation describe-stacks \
+    --stack-name "${CLUSTER_NAME}" \
+    --query "Stacks[0].Outputs[?OutputKey=='NodeAutoScalingGroup'].OutputValue" \
+    --output text
+}
+
+get_aws_region() {
+  aws eks describe-cluster --name "${CLUSTER_NAME}" --query 'cluster.arn' --output text | cut -d: -f4
+}
+
+tag_asg_for_autoscaler() {
+  echo "==> Tagging node ASG for Cluster Autoscaler auto-discovery"
+
+  local asg_name
+  asg_name=$(get_node_group_asg_name)
+
+  aws autoscaling create-or-update-tags --tags \
+    "ResourceId=${asg_name},ResourceType=auto-scaling-group,Key=k8s.io/cluster-autoscaler/enabled,Value=true,PropagateAtLaunch=false" \
+    "ResourceId=${asg_name},ResourceType=auto-scaling-group,Key=k8s.io/cluster-autoscaler/${CLUSTER_NAME},Value=owned,PropagateAtLaunch=false"
+
+  echo "    Tagged ${asg_name}."
+}
+
+grant_autoscaler_permissions() {
+  echo "==> Granting Cluster Autoscaler permissions on NodeInstanceRole"
+
+  local node_role_name
+  node_role_name=$(basename "$(get_node_instance_role_arn)")
+
+  # NOTE: no IRSA/OIDC is set up for this cluster, so this grants autoscaling
+  # permissions to the shared node role instead of a dedicated pod-level role.
+  aws iam put-role-policy \
+    --role-name "${node_role_name}" \
+    --policy-name ClusterAutoscalerPolicy \
+    --policy-document '{
+      "Version": "2012-10-17",
+      "Statement": [
+        {
+          "Effect": "Allow",
+          "Action": [
+            "autoscaling:DescribeAutoScalingGroups",
+            "autoscaling:DescribeAutoScalingInstances",
+            "autoscaling:DescribeLaunchConfigurations",
+            "autoscaling:DescribeScalingActivities",
+            "autoscaling:DescribeTags",
+            "autoscaling:SetDesiredCapacity",
+            "autoscaling:TerminateInstanceInAutoScalingGroup",
+            "ec2:DescribeInstanceTypes",
+            "ec2:DescribeLaunchTemplateVersions"
+          ],
+          "Resource": "*"
+        }
+      ]
+    }'
+
+  echo "    Attached ClusterAutoscalerPolicy to ${node_role_name}."
+}
+
+deploy_cluster_autoscaler() {
+  echo "==> Deploying Cluster Autoscaler"
+
+  local region
+  region=$(get_aws_region)
+
+  cat <<EOF | kubectl apply -f -
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: cluster-autoscaler
+  namespace: kube-system
+  labels:
+    k8s-addon: cluster-autoscaler.addons.k8s.io
+    k8s-app: cluster-autoscaler
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: cluster-autoscaler
+  labels:
+    k8s-addon: cluster-autoscaler.addons.k8s.io
+    k8s-app: cluster-autoscaler
+rules:
+  - apiGroups: [""]
+    resources: ["events", "endpoints"]
+    verbs: ["create", "patch"]
+  - apiGroups: [""]
+    resources: ["pods/eviction"]
+    verbs: ["create"]
+  - apiGroups: [""]
+    resources: ["pods/status"]
+    verbs: ["update"]
+  - apiGroups: [""]
+    resources: ["endpoints"]
+    resourceNames: ["cluster-autoscaler"]
+    verbs: ["get", "update"]
+  - apiGroups: [""]
+    resources: ["nodes"]
+    verbs: ["watch", "list", "get", "update"]
+  - apiGroups: [""]
+    resources: ["namespaces", "pods", "services", "replicationcontrollers", "persistentvolumeclaims", "persistentvolumes"]
+    verbs: ["watch", "list", "get"]
+  - apiGroups: ["extensions"]
+    resources: ["replicasets", "daemonsets"]
+    verbs: ["watch", "list", "get"]
+  - apiGroups: ["policy"]
+    resources: ["poddisruptionbudgets"]
+    verbs: ["watch", "list"]
+  - apiGroups: ["apps"]
+    resources: ["statefulsets", "replicasets", "daemonsets"]
+    verbs: ["watch", "list", "get"]
+  - apiGroups: ["storage.k8s.io"]
+    resources: ["storageclasses", "csinodes", "csidrivers", "csistoragecapacities"]
+    verbs: ["watch", "list", "get"]
+  - apiGroups: ["batch", "extensions"]
+    resources: ["jobs"]
+    verbs: ["get", "list", "watch", "patch"]
+  - apiGroups: ["coordination.k8s.io"]
+    resources: ["leases"]
+    verbs: ["create"]
+  - apiGroups: ["coordination.k8s.io"]
+    resourceNames: ["cluster-autoscaler"]
+    resources: ["leases"]
+    verbs: ["get", "update"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: cluster-autoscaler
+  namespace: kube-system
+  labels:
+    k8s-addon: cluster-autoscaler.addons.k8s.io
+    k8s-app: cluster-autoscaler
+rules:
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    verbs: ["create", "list", "watch"]
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    resourceNames: ["cluster-autoscaler-status", "cluster-autoscaler-priority-expander"]
+    verbs: ["delete", "get", "update", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: cluster-autoscaler
+  labels:
+    k8s-addon: cluster-autoscaler.addons.k8s.io
+    k8s-app: cluster-autoscaler
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: cluster-autoscaler
+subjects:
+  - kind: ServiceAccount
+    name: cluster-autoscaler
+    namespace: kube-system
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: cluster-autoscaler
+  namespace: kube-system
+  labels:
+    k8s-addon: cluster-autoscaler.addons.k8s.io
+    k8s-app: cluster-autoscaler
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: cluster-autoscaler
+subjects:
+  - kind: ServiceAccount
+    name: cluster-autoscaler
+    namespace: kube-system
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: cluster-autoscaler
+  namespace: kube-system
+  labels:
+    app: cluster-autoscaler
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: cluster-autoscaler
+  template:
+    metadata:
+      labels:
+        app: cluster-autoscaler
+      annotations:
+        cluster-autoscaler.kubernetes.io/safe-to-evict: "false"
+    spec:
+      serviceAccountName: cluster-autoscaler
+      containers:
+        - image: registry.k8s.io/autoscaling/cluster-autoscaler:v${KUBERNETES_VERSION}.0
+          name: cluster-autoscaler
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 256m
+              memory: 512Mi
+          command:
+            - ./cluster-autoscaler
+            - --v=4
+            - --stderrthreshold=info
+            - --cloud-provider=aws
+            - --skip-nodes-with-local-storage=false
+            - --expander=least-waste
+            - --node-group-auto-discovery=asg:tag=k8s.io/cluster-autoscaler/enabled,k8s.io/cluster-autoscaler/${CLUSTER_NAME}
+          env:
+            - name: AWS_REGION
+              value: ${region}
+EOF
+
+  echo "    Cluster Autoscaler deployed."
+}
+
 deploy_sre_app() {
-  echo "==> Creating namespace sre-app and deployment (nginx, nodeSelector nodetype=sre)"
+  echo "==> Creating namespace sre-app and deployment"
 
   kubectl create namespace sre-app --dry-run=client -o yaml | kubectl apply -f -
 
@@ -359,7 +580,7 @@ EOF
 }
 
 deploy_devops_app() {
-  echo "==> Creating namespace devops-app and deployment (busybox, nodeSelector nodetype=devops)"
+  echo "==> Creating namespace devops-app and deployment"
 
   kubectl create namespace devops-app --dry-run=client -o yaml | kubectl apply -f -
 
@@ -433,6 +654,9 @@ main() {
   join_worker_nodes
   verify_nodes_joined
   install_metrics_server
+  tag_asg_for_autoscaler
+  grant_autoscaler_permissions
+  deploy_cluster_autoscaler
   deploy_sre_app
   deploy_devops_app
 
