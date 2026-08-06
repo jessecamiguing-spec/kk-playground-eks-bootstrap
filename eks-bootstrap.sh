@@ -273,6 +273,24 @@ verify_nodes_joined() {
   echo "    ${ready_count}/${NODE_DESIRED_COUNT} node(s) Ready."
 }
 
+install_metrics_server() {
+  echo "==> Installing Metrics Server (required for 'kubectl top nodes')"
+
+  kubectl apply -f https://github.com/kubernetes-sigs/metrics-server/releases/latest/download/components.yaml
+
+  if kubectl get deployment metrics-server -n kube-system \
+      -o jsonpath='{.spec.template.spec.containers[0].args}' | grep -q -- '--kubelet-insecure-tls'; then
+    echo "    --kubelet-insecure-tls already set."
+  else
+    # Self-managed node kubelet certs aren't signed for a hostname metrics-server trusts by default.
+    kubectl patch deployment metrics-server -n kube-system --type='json' \
+      -p='[{"op":"add","path":"/spec/template/spec/containers/0/args/-","value":"--kubelet-insecure-tls"}]'
+    echo "    Patched metrics-server with --kubelet-insecure-tls."
+  fi
+
+  echo "    Metrics Server installed. 'kubectl top nodes' should work within ~30-60s."
+}
+
 main() {
   create_cluster_role
   prompt_cluster_name
@@ -282,6 +300,7 @@ main() {
   configure_kubeconfig
   join_worker_nodes
   verify_nodes_joined
+  install_metrics_server
 }
 
 main "$@"
