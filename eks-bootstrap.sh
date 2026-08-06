@@ -323,7 +323,7 @@ install_metrics_server() {
 }
 
 deploy_sre_app() {
-  echo "==> Creating namespace sre-app and deployment (nginx, nodeSelector nodetype=sre)"
+  echo "==> Creating namespace sre-app and deployment"
 
   kubectl create namespace sre-app --dry-run=client -o yaml | kubectl apply -f -
 
@@ -359,7 +359,7 @@ EOF
 }
 
 deploy_devops_app() {
-  echo "==> Creating namespace devops-app and deployment (busybox, nodeSelector nodetype=devops)"
+  echo "==> Creating namespace devops-app and deployment"
 
   kubectl create namespace devops-app --dry-run=client -o yaml | kubectl apply -f -
 
