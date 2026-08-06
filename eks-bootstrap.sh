@@ -324,6 +324,79 @@ install_metrics_server() {
   echo "    Metrics Server installed. 'kubectl top nodes' should work within ~30-60s."
 }
 
+deploy_sre_app() {
+  echo "==> Creating namespace sre-app and deployment (nginx, nodeSelector nodetype=sre)"
+
+  kubectl create namespace sre-app --dry-run=client -o yaml | kubectl apply -f -
+
+  cat <<'EOF' | kubectl apply -f -
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: sre-app
+  namespace: sre-app
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: sre-app
+  template:
+    metadata:
+      labels:
+        app: sre-app
+    spec:
+      nodeSelector:
+        nodetype: sre
+      containers:
+        - name: sre-app
+          image: nginx
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 256m
+              memory: 512Mi
+EOF
+}
+
+deploy_devops_app() {
+  echo "==> Creating namespace devops-app and deployment (busybox, nodeSelector nodetype=devops)"
+
+  kubectl create namespace devops-app --dry-run=client -o yaml | kubectl apply -f -
+
+  cat <<'EOF' | kubectl apply -f -
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: devops-app
+  namespace: devops-app
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: devops-app
+  template:
+    metadata:
+      labels:
+        app: devops-app
+    spec:
+      nodeSelector:
+        nodetype: devops
+      containers:
+        - name: devops-app
+          image: busybox
+          command: ["sleep", "infinity"]
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 256m
+              memory: 512Mi
+EOF
+}
+
 main() {
   create_cluster_role
   prompt_cluster_name
@@ -335,6 +408,10 @@ main() {
   join_worker_nodes
   verify_nodes_joined
   install_metrics_server
+  deploy_sre_app
+  deploy_devops_app
+
+  echo "==> sre-app and devops-app deployed."
 }
 
 main "$@"
