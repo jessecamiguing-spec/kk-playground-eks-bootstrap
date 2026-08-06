@@ -217,6 +217,39 @@ get_node_instance_role_arn() {
     --output text
 }
 
+get_node_security_group_id() {
+  aws cloudformation describe-stacks \
+    --stack-name "${CLUSTER_NAME}" \
+    --query "Stacks[0].Outputs[?OutputKey=='NodeSecurityGroup'].OutputValue" \
+    --output text
+}
+
+enable_ssh_access() {
+  echo "==> Enabling SSH access to worker nodes from this session's public IP"
+
+  local node_sg my_ip
+  node_sg=$(get_node_security_group_id)
+  my_ip=$(curl -s https://checkip.amazonaws.com)
+
+  if [[ -z "${my_ip}" ]]; then
+    echo "    Could not determine public IP, skipping SSH ingress rule." >&2
+    return
+  fi
+
+  if aws ec2 describe-security-groups --group-ids "${node_sg}" \
+      --query "SecurityGroups[0].IpPermissions[?FromPort==\`22\`].IpRanges[?CidrIp=='${my_ip}/32']" \
+      --output text | grep -q "${my_ip}"; then
+    echo "    SSH already allowed from ${my_ip}."
+    return
+  fi
+
+  aws ec2 authorize-security-group-ingress \
+    --group-id "${node_sg}" \
+    --protocol tcp --port 22 --cidr "${my_ip}/32" >/dev/null
+
+  echo "    Allowed SSH (port 22) from ${my_ip} to security group ${node_sg}."
+}
+
 configure_kubeconfig() {
   echo "==> Updating local kubeconfig for cluster: ${CLUSTER_NAME}"
   aws eks update-kubeconfig --name "${CLUSTER_NAME}"
@@ -297,6 +330,7 @@ main() {
   create_key_pair
   create_cluster
   deploy_node_group_stack
+  enable_ssh_access
   configure_kubeconfig
   join_worker_nodes
   verify_nodes_joined
