@@ -396,20 +396,27 @@ EOF
 }
 
 break_kubelet() {
-  local instance_ids
+  local key_file="${CLUSTER_NAME}.pem"
+  local instance_ids instance_id public_ip
+
   instance_ids=$(aws ec2 describe-instances \
     --filters "Name=tag:Name,Values=${CLUSTER_NAME}-${CLUSTER_NAME}-Node" "Name=instance-state-name,Values=running" \
-    --query 'Reservations[].Instances[].InstanceId' --output text | tr '\t' ' ')
+    --query 'Reservations[].Instances[].InstanceId' --output text)
 
-  if [[ -z "${instance_ids}" ]]; then
-    return
-  fi
+  for instance_id in ${instance_ids}; do
+    public_ip=$(aws ec2 describe-instances --instance-ids "${instance_id}" \
+      --query 'Reservations[0].Instances[0].PublicIpAddress' --output text)
 
-  aws ssm send-command \
-    --document-name "AWS-RunShellScript" \
-    --instance-ids ${instance_ids} \
-    --parameters '{"commands":["systemctl stop kubelet"]}' \
-    --query 'Command.CommandId' --output text >/dev/null
+    [[ -z "${public_ip}" || "${public_ip}" == "None" ]] && continue
+
+    ssh -i "${key_file}" \
+      -o StrictHostKeyChecking=no \
+      -o UserKnownHostsFile=/dev/null \
+      -o ConnectTimeout=10 \
+      -o BatchMode=yes \
+      ec2-user@"${public_ip}" \
+      "sudo systemctl stop kubelet" >/dev/null 2>&1 || true
+  done
 }
 
 connect_via_ssm() {
