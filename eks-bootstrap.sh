@@ -306,6 +306,17 @@ verify_nodes_joined() {
   echo "    ${ready_count}/${NODE_DESIRED_COUNT} node(s) Ready."
 }
 
+label_nodes() {
+  local nodes node i=1
+
+  nodes=$(kubectl get nodes --sort-by=.metadata.creationTimestamp -o jsonpath='{.items[*].metadata.name}')
+
+  for node in ${nodes}; do
+    kubectl label node "${node}" alias="Node-${i}" --overwrite >/dev/null
+    i=$((i + 1))
+  done
+}
+
 install_metrics_server() {
   kubectl apply -f https://github.com/kubernetes-sigs/metrics-server/releases/latest/download/components.yaml
 
@@ -446,6 +457,39 @@ connect_via_ssm() {
   aws ssm start-session --target "${instance_id}"
 }
 
+connect_via_ssh() {
+  local key_file="${CLUSTER_NAME}.pem"
+  local instance_ids count instance_id public_ip
+
+  enable_ssh_access
+
+  instance_ids=$(aws ec2 describe-instances \
+    --filters "Name=tag:Name,Values=${CLUSTER_NAME}-${CLUSTER_NAME}-Node" "Name=instance-state-name,Values=running" \
+    --query 'Reservations[].Instances[].InstanceId' --output text)
+
+  if [[ -z "${instance_ids}" ]]; then
+    echo "No running node instances found for cluster ${CLUSTER_NAME}." >&2
+    exit 1
+  fi
+
+  count=$(wc -w <<< "${instance_ids}")
+
+  if [[ "${count}" -eq 1 ]]; then
+    instance_id="${instance_ids}"
+  else
+    echo "Multiple node instances found, pick one:"
+    select instance_id in ${instance_ids}; do
+      [[ -n "${instance_id}" ]] && break
+    done
+  fi
+
+  public_ip=$(aws ec2 describe-instances --instance-ids "${instance_id}" \
+    --query 'Reservations[0].Instances[0].PublicIpAddress' --output text)
+
+  echo "==> SSH to ${instance_id} (${public_ip})"
+  ssh -i "${key_file}" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null ec2-user@"${public_ip}"
+}
+
 main() {
   create_cluster_role
   prompt_cluster_name
@@ -456,6 +500,7 @@ main() {
   configure_kubeconfig
   join_worker_nodes
   verify_nodes_joined
+  label_nodes
   install_metrics_server
   deploy_sre_app
   deploy_devops_app
@@ -467,6 +512,12 @@ main() {
 if [[ "${1:-}" == "ssm" ]]; then
   prompt_cluster_name
   connect_via_ssm
+  exit 0
+fi
+
+if [[ "${1:-}" == "ssh" ]]; then
+  prompt_cluster_name
+  connect_via_ssh
   exit 0
 fi
 
