@@ -9,7 +9,7 @@ CLUSTER_ROLE_NAME="eksClusterRole"
 CLUSTER_ROLE_POLICY_ARN="arn:aws:iam::aws:policy/AmazonEKSClusterPolicy"
 KUBERNETES_VERSION="1.35"
 NODEGROUP_TEMPLATE_URL="https://s3.us-west-2.amazonaws.com/amazon-eks/cloudformation/2025-11-26/amazon-eks-nodegroup.yaml"
-NODE_DESIRED_COUNT=2
+NODE_DESIRED_COUNT=3
 NODE_JOIN_TIMEOUT_SECONDS=300
 NODE_JOIN_POLL_INTERVAL_SECONDS=15
 CLUSTER_NAME=""
@@ -193,7 +193,7 @@ deploy_node_group_stack() {
   {"ParameterKey": "NodeGroupName", "ParameterValue": "${CLUSTER_NAME}"},
   {"ParameterKey": "NodeImageIdSSMParam", "ParameterValue": "/aws/service/eks/optimized-ami/${KUBERNETES_VERSION}/amazon-linux-2023/x86_64/standard/recommended/image_id"},
   {"ParameterKey": "NodeAutoScalingGroupMinSize", "ParameterValue": "1"},
-  {"ParameterKey": "NodeAutoScalingGroupDesiredCapacity", "ParameterValue": "2"},
+  {"ParameterKey": "NodeAutoScalingGroupDesiredCapacity", "ParameterValue": "3"},
   {"ParameterKey": "NodeAutoScalingGroupMaxSize", "ParameterValue": "3"},
   {"ParameterKey": "NodeInstanceType", "ParameterValue": "t3.small"},
   {"ParameterKey": "KeyName", "ParameterValue": "${CLUSTER_NAME}"},
@@ -366,6 +366,17 @@ spec:
             limits:
               cpu: 256m
               memory: 512Mi
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: sre-app
+  namespace: sre-app
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app: sre-app
 EOF
 }
 
