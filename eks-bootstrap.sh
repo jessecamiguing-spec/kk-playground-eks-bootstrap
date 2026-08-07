@@ -354,8 +354,21 @@ spec:
       labels:
         app: sre-app
     spec:
-      nodeSelector:
-        nodetype: sre
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                  - key: nodetype
+                    operator: In
+                    values: ["sre", "production"]
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              preference:
+                matchExpressions:
+                  - key: nodetype
+                    operator: In
+                    values: ["sre"]
       containers:
         - name: sre-app
           image: nginx
@@ -373,7 +386,7 @@ metadata:
   name: sre-app
   namespace: sre-app
 spec:
-  minAvailable: 1
+  maxUnavailable: 50%
   selector:
     matchLabels:
       app: sre-app
