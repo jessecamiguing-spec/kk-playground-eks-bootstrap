@@ -361,7 +361,7 @@ spec:
               - matchExpressions:
                   - key: nodetype
                     operator: In
-                    values: ["sre", "production"]
+                    values: ["sre", "production-failover"]
           preferredDuringSchedulingIgnoredDuringExecution:
             - weight: 100
               preference:
